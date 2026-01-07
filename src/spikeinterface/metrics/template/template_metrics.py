@@ -140,10 +140,8 @@ class ComputeTemplateMetrics(BaseMetricExtension):
         depth_direction="y",
         min_thresh_detect_peaks_troughs=0.4,
         smooth=True,
-        smooth_method="savgol",
         smooth_window_frac=0.1,
         smooth_polyorder=3,
-        svd_n_components=3,
     ):
         # Auto-detect if multi-channel metrics should be included based on number of channels
         num_channels = self.sorting_analyzer.get_num_channels()
@@ -174,10 +172,8 @@ class ComputeTemplateMetrics(BaseMetricExtension):
             depth_direction=depth_direction,
             min_thresh_detect_peaks_troughs=min_thresh_detect_peaks_troughs,
             smooth=smooth,
-            smooth_method=smooth_method,
             smooth_window_frac=smooth_window_frac,
             smooth_polyorder=smooth_polyorder,
-            svd_n_components=svd_n_components,
         )
 
     def _prepare_data(self, sorting_analyzer, unit_ids):
@@ -229,10 +225,8 @@ class ComputeTemplateMetrics(BaseMetricExtension):
                 template_upsampled,
                 min_thresh_detect_peaks_troughs=self.params['min_thresh_detect_peaks_troughs'],
                 smooth=self.params['smooth'],
-                smooth_method=self.params['smooth_method'],
                 smooth_window_frac=self.params['smooth_window_frac'],
                 smooth_polyorder=self.params['smooth_polyorder'],
-                svd_n_components=self.params['svd_n_components'],
             )
 
             templates_single.append(template_upsampled)
@@ -278,6 +272,10 @@ class ComputeTemplateMetrics(BaseMetricExtension):
             tmp_data["channel_locations_multi"] = channel_locations_multi
             tmp_data["depth_direction"] = self.params["depth_direction"]
 
+        # store trough and peak dicts for GUI use 
+        self.data['troughs_info'] = troughs_dict
+        self.data['peaks_before_info'] = peaks_before_dict
+        self.data['peaks_after_info'] = troughs_dict, peaks_before_dict, peaks_after_dict
         return tmp_data
 
 
