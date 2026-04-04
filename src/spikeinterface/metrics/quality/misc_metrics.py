@@ -554,6 +554,7 @@ def compute_sliding_rp_violations(
     max_ref_period_ms=10,
     contamination_values=None,
     confidence_threshold=0.9,
+    censored_period_ms=0.0,
 ):
     """
     Compute sliding refractory period violations, a metric developed by IBL which computes
@@ -585,6 +586,9 @@ def compute_sliding_rp_violations(
     confidence_threshold : float, default: 0.9
         Confidence threshold (between 0 and 1) for determining the minimum contamination.
         A higher value requires stronger statistical evidence. Default is 0.9 (90% confidence).
+    censored_period_ms : float, default: 0.0
+        Censored period in milliseconds. ACG bins below this duration are zeroed out
+        before counting violations, excluding duplicate spike detections.
 
     Returns
     -------
@@ -644,6 +648,7 @@ def compute_sliding_rp_violations(
             max_ref_period_ms,
             contamination_values,
             confidence_threshold=confidence_threshold,
+            censored_period_ms=censored_period_ms,
         )
         contamination[unit_id] = min_contam
         estimated_tauR[unit_id] = est_tauR
@@ -662,6 +667,7 @@ class SlidingRPViolation(BaseMetric):
         "max_ref_period_ms": 10,
         "contamination_values": None,
         "confidence_threshold": 0.9,
+        "censored_period_ms": 0.0,
     }
     metric_columns = {"sliding_rp_violation": float, "sliding_rp_estimated_tauR": float}
     metric_descriptions = {
@@ -1713,6 +1719,7 @@ def slidingRP_violations(
     max_ref_period_ms=10,
     contamination_values=None,
     confidence_threshold=0.9,
+    censored_period_ms=0.0,
 ):
     """
     A metric developed by IBL which determines whether the refractory period violations
@@ -1738,6 +1745,9 @@ def slidingRP_violations(
         The contamination values to test, if None it is set to np.arange(0.5, 35, 0.5) / 100.
     confidence_threshold : float, default: 0.9
         Confidence threshold (between 0 and 1). Default is 0.9 (90% confidence).
+    censored_period_ms : float, default: 0.0
+        Censored period in milliseconds. ACG bins below this duration are zeroed out
+        before counting violations, excluding duplicate spike detections.
 
     Code adapted from:
     https://github.com/SteinmetzLab/slidingRefractory/blob/master/python/slidingRP/metrics.py#L166
@@ -1783,14 +1793,27 @@ def slidingRP_violations(
     # correlogram = compute_correlograms(sorting, 2*window_size_s*1000, bin_size_ms, method=method)[0][0, 0]
     correlogram_positive = correlogram[len(correlogram) // 2 :]
 
+    # Apply censored period: skip ACG bins below tauC and subtract tauC from effective RP duration
+    censored_period_s = censored_period_ms / 1000
+    n_censored_bins = int(np.floor(censored_period_s / rp_bin_size))
+    correlogram_censored = correlogram_positive.copy()
+    correlogram_censored[:n_censored_bins] = 0
+
+    # Observed violations: cumsum of ACG starting after censored bins
+    obs_viol = np.cumsum(correlogram_censored[0 : rp_centers.size])[np.newaxis, :]
+
+    # Effective refractory period duration: (tauR - tauC), floored at 0
+    effective_rp_dur = np.maximum(rp_centers[np.newaxis, :] + rp_bin_size / 2 - censored_period_s, 0)
+
     conf_matrix = _compute_violations(
-        np.cumsum(correlogram_positive[0 : rp_centers.size])[np.newaxis, :],
+        obs_viol,
         firing_rate,
         n_spikes,
-        rp_centers[np.newaxis, :] + rp_bin_size / 2,
+        effective_rp_dur,
         contamination_values[:, np.newaxis],
     )
-    test_rp_centers_mask = rp_centers > exclude_ref_period_below_ms / 1000.0  # (in seconds)
+    # Exclude tauR values below exclude_ref_period_below_ms AND below tauC (no valid window)
+    test_rp_centers_mask = (rp_centers > exclude_ref_period_below_ms / 1000.0) & (rp_centers > censored_period_s)
 
     # For each tauR, find the minimum contamination where confidence exceeds threshold
     contamination_at_each_tauR = np.full(len(rp_centers), np.nan)
