@@ -639,7 +639,7 @@ def compute_sliding_rp_violations(
 
         sub_sorting = NumpySorting(sub_spikes, fs, unit_ids=[unit_id])
 
-        min_contam, est_tauR, _, _ = slidingRP_violations(
+        min_contam, est_tauR = slidingRP_violations(
             sub_sorting,
             duration,
             bin_size_ms,
@@ -1815,26 +1815,24 @@ def slidingRP_violations(
     # Exclude tauR values below exclude_ref_period_below_ms AND below tauC (no valid window)
     test_rp_centers_mask = (rp_centers > exclude_ref_period_below_ms / 1000.0) & (rp_centers > censored_period_s)
 
-    # For each tauR, find the minimum contamination where confidence exceeds threshold
-    contamination_at_each_tauR = np.full(len(rp_centers), np.nan)
-    for j in range(len(rp_centers)):
-        passing = np.where(conf_matrix[:, j] > confidence_threshold)[0]
-        if len(passing) > 0:
-            contamination_at_each_tauR[j] = contamination_values[passing[0]]
+    # Search entire masked matrix at once (same as original IBL implementation)
+    inds_passing = np.row_stack(np.where(conf_matrix[:, test_rp_centers_mask] > confidence_threshold))
 
-    # Only test for refractory period durations greater than 'exclude_ref_period_below_ms'
-    masked_contam = contamination_at_each_tauR.copy()
-    masked_contam[~test_rp_centers_mask] = np.nan
+    if len(inds_passing[0]) > 0:
+        # inds_passing[0] = contamination indices (sorted ascending), [1] = tauR indices (in masked space)
+        min_contam_idx = inds_passing[0][0]
+        min_contamination = contamination_values[min_contam_idx]
 
-    if np.any(~np.isnan(masked_contam)):
-        best_idx = np.nanargmin(masked_contam)
-        min_contamination = masked_contam[best_idx]
-        estimated_tauR = rp_centers[best_idx]
+        # Find which tauR gave this minimum contamination — first eligible tauR where it passes
+        eligible_indices = np.where(test_rp_centers_mask)[0]
+        # Among all (contam, tauR) pairs at min contamination, get the tauR index
+        at_min_contam = inds_passing[1][inds_passing[0] == min_contam_idx]
+        estimated_tauR = rp_centers[eligible_indices[at_min_contam[0]]]
     else:
         min_contamination = np.nan
         estimated_tauR = np.nan
 
-    return min_contamination, estimated_tauR, contamination_at_each_tauR, rp_centers
+    return min_contamination, estimated_tauR
 
 
 def _compute_rp_contamination_one_unit(
